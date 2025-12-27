@@ -1,13 +1,44 @@
 {
   "name": "react-pref-guard",
-  "version": "1.0.0",
-  "main": "index.js",
-  "private":true,
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "version": "0.1.0",
+  "description": "Dev-only React performance guard using React Profiler",
+  "author": "Amiya Das",
+  "license": "MIT",
+  "private": true,
+ "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": ">=17"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "react",
+    "performance",
+    "react-profiler",
+    "devtools"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.10.4",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@types/react": "^19.2.7"
+  }
 }
