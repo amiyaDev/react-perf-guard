@@ -1,12 +1,12 @@
-// worker/createWorker.ts
+// worker/createWorker.ts - Enhanced with trend detection
 export function createAnalyzerWorker() {
   const code = `
     /* ===============================
-       PerfGuard – Rule DSL Worker
+       PerfGuard – Enhanced Rule DSL Worker
        =============================== */
 
     const history = new Map();
-    const MAX_HISTORY = 5;
+    const MAX_HISTORY = 10; // Increased for trend detection
     let RULES = [];
 
     /* -------------------------------
@@ -56,6 +56,35 @@ export function createAnalyzerWorker() {
     }
 
     /* -------------------------------
+       Trend Detection
+    -------------------------------- */
+
+    function detectTrend(historyList, field) {
+      if (historyList.length < 5) return { direction: 'stable', change: 0 };
+      
+      // Use linear regression to detect trend
+      const values = historyList.map(s => s[field]);
+      const n = values.length;
+      const indices = Array.from({ length: n }, (_, i) => i);
+      
+      const sumX = indices.reduce((a, b) => a + b, 0);
+      const sumY = values.reduce((a, b) => a + b, 0);
+      const sumXY = indices.reduce((sum, x, i) => sum + x * values[i], 0);
+      const sumX2 = indices.reduce((sum, x) => sum + x * x, 0);
+      
+      const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+      const avgValue = sumY / n;
+      
+      // Calculate percentage change
+      const percentChange = (slope * n / avgValue) * 100;
+      
+      return {
+        direction: slope > 0 ? 'increasing' : slope < 0 ? 'decreasing' : 'stable',
+        change: Math.abs(percentChange)
+      };
+    }
+
+    /* -------------------------------
        Rule Evaluation Engine
     -------------------------------- */
 
@@ -80,11 +109,31 @@ export function createAnalyzerWorker() {
             issues.push({
               ruleId: rule.id,
               confidence: 1,
-              severity: downgradeSeverity(
-                rule.baseSeverity,
-                1,
-                snapshot.boundaryType || "HOC"
-              ),
+              severity: downgradeSeverity(rule.baseSeverity, 1, snapshot.boundaryType || "HOC"),
+              reason,
+            });
+          }
+          continue;
+        }
+
+        /* ----- Trend Detection Rule ----- */
+        if (rule.trend && historyList.length >= 5) {
+          const trend = detectTrend(historyList, rule.trend.field);
+          
+          if (
+            trend.direction === rule.trend.direction &&
+            trend.change >= rule.trend.threshold
+          ) {
+            const reason = interpolateMessage(rule.messageTemplate, {
+              change: trend.change.toFixed(1),
+            });
+
+            const confidence = Math.min(trend.change / 100, 1.0);
+
+            issues.push({
+              ruleId: rule.id,
+              confidence,
+              severity: downgradeSeverity(rule.baseSeverity, confidence, snapshot.boundaryType || "HOC"),
               reason,
             });
           }
@@ -105,11 +154,7 @@ export function createAnalyzerWorker() {
             issues.push({
               ruleId: rule.id,
               confidence,
-              severity: downgradeSeverity(
-                rule.baseSeverity,
-                confidence,
-                snapshot.boundaryType || "HOC"
-              ),
+              severity: downgradeSeverity(rule.baseSeverity, confidence, snapshot.boundaryType || "HOC"),
               reason,
             });
           }
@@ -131,18 +176,20 @@ export function createAnalyzerWorker() {
       if (type === "INIT_RULES") {
         RULES = payload;
         console.log('[PerfGuard Worker] Rules loaded:', RULES.length);
+        self.postMessage({ type: "INIT_SUCCESS", count: RULES.length });
         return;
       }
 
       /* Evaluate snapshots */
       if (type === "EVALUATE") {
         const results = [];
+        let hasCritical = false;
 
         for (const snapshot of payload) {
           const issues = evaluate(snapshot);
 
           if (issues.length) {
-            results.push({
+            const componentResult = {
               component: snapshot.component,
               boundaryType: snapshot.boundaryType || "HOC",
               metrics: {
@@ -151,12 +198,41 @@ export function createAnalyzerWorker() {
                 maxTime: snapshot.maxTime,
               },
               issues,
-            });
+            };
+
+            // Check for critical issues
+            if (issues.some(i => i.severity === 'CRITICAL')) {
+              hasCritical = true;
+              componentResult.hasCritical = true;
+            }
+
+            results.push(componentResult);
           }
         }
 
         console.log('[PerfGuard Worker] Evaluation complete:', results.length, 'issues');
-        self.postMessage(results);
+        self.postMessage({ 
+          type: "RESULTS", 
+          data: results,
+          hasCritical,
+          timestamp: Date.now()
+        });
+      }
+
+      /* Reset history */
+      if (type === "RESET") {
+        history.clear();
+        self.postMessage({ type: "RESET_SUCCESS" });
+      }
+
+      /* Get stats */
+      if (type === "GET_STATS") {
+        const stats = {
+          componentsTracked: history.size,
+          totalSnapshots: Array.from(history.values()).reduce((sum, list) => sum + list.length, 0),
+          rulesLoaded: RULES.length,
+        };
+        self.postMessage({ type: "STATS", data: stats });
       }
     };
   `;

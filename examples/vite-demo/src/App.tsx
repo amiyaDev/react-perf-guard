@@ -3,8 +3,7 @@ import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
 
-import PerfGuardE2ETestPage from './PrefGuardTestPage'
-import PerfGuardTestHarness from './FInalTest'
+import PerfTestPage from './Testing/Components/PrefTestPage'
 
 function App() {
   const [count, setCount] = useState(0)
@@ -32,7 +31,8 @@ function App() {
         Click on the Vite and React logos to learn more
       </p>
 
-       <PerfGuardE2ETestPage />
+       {/* <PerfGuardE2ETestPage /> */}
+       <PerfTestPage />
 
 {/* <PerfGuardTestHarness /> */}
       {/* <BadList items={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} /> */}

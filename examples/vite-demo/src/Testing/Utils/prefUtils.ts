@@ -1,7 +1,7 @@
 // utils/perfUtils.ts
 export function burnCPU(ms: number) {
   const start = performance.now();
-  while (performance.now() - start < ms) {}
+  while (performance.now() - start < ms) { /* empty */ }
 }
 
 export function triggerRenders(

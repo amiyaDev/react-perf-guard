@@ -1,122 +1,10 @@
-// type IssueType =
-//   | "EXCESSIVE_RENDERS"
-//   | "SLOW_RENDER"
-//   | "UNSTABLE_STATE_UPDATES"
-//   | "UNOPTIMIZED_LIST";
-
-// export function showWarning(result: {
-//   component: string;
-//   renders: number;
-//   avgTime: number;
-//   maxTime: number;
-//   issues: IssueType[];
-// }) {
-//   if (!result.issues || result.issues.length === 0) return;
-
-//   console.group(
-//     `%c[PerfGuard] ${result.component}`,
-//     "color: orange; font-weight: bold"
-//   );
-
-//   /* ----------------------------------
-//      Excessive Re-renders
-//   ---------------------------------- */
-//   if (result.issues.includes("EXCESSIVE_RENDERS")) {
-//     console.warn("• Excessive re-renders detected");
-//     console.info(
-//       "Why this matters:",
-//       "Frequent renders increase CPU usage and slow the UI."
-//     );
-//     console.info(
-//       "Fix:",
-//       "Wrap component with React.memo, avoid unnecessary state updates, and stabilize props."
-//     );
-//   }
-
-//   /* ----------------------------------
-//      Slow Render
-//   ---------------------------------- */
-//   if (result.issues.includes("SLOW_RENDER")) {
-//     console.warn("• Slow render detected (>16ms)");
-//     console.info(
-//       "Why this matters:",
-//       "Slow renders block the main thread and cause frame drops."
-//     );
-//     console.info(
-//       "Fix:",
-//       "Move heavy calculations to useMemo, split components, or offload work to a Web Worker."
-//     );
-//   }
-
-//   /* ----------------------------------
-//      Unstable State Updates
-//   ---------------------------------- */
-//   if (result.issues.includes("UNSTABLE_STATE_UPDATES")) {
-//     console.warn("• Unstable state updates detected");
-//     console.info(
-//       "Why this matters:",
-//       "State changes on every render cause cascading re-renders."
-//     );
-//     console.info(
-//       "Fix:",
-//       "Avoid setting state during render and debounce rapid updates."
-//     );
-//   }
-
-//   /* ----------------------------------
-//      Unoptimized Large List
-//   ---------------------------------- */
-//   if (result.issues.includes("UNOPTIMIZED_LIST")) {
-//     console.warn("• Large list rendering detected");
-//     console.info(
-//       "Why this matters:",
-//       "Rendering many DOM nodes is expensive and slows scrolling."
-//     );
-//     console.info(
-//       "Fix:",
-//       "Use list virtualization (react-window, react-virtualized)."
-//     );
-//   }
-
-//   /* ----------------------------------
-//      Summary
-//   ---------------------------------- */
-//   console.info(
-//     "Metrics:",
-//     `renders=${result.renders}, avg=${result.avgTime.toFixed(
-//       2
-//     )}ms, max=${result.maxTime.toFixed(2)}ms`
-//   );
-
-//   console.groupEnd();
-// }
-
-
-// export function showWarning(result: any) {
-//   console.log("Showing warning for", result);
-//   console.group(
-//     `%c[PerfGuard] ${result.component}`,
-//     "color:red;font-weight:bold"
-//   );
-
-//   result.issues.forEach((issue: any) => {
-//     console.warn(`• ${issue.ruleId}`);
-//     console.info(`Severity: ${issue.severity}`);
-//     console.info(
-//       `Confidence: ${(issue.confidence * 100).toFixed(0)}%`
-//     );
-//     console.info(`Why: ${issue.reason}`);
-//   });
-
-//   console.groupEnd();
-// }
-
-
-// warnings.ts
+// warnings.ts - Enhanced warnings
 export function showWarning(result: any) {
+  const hasCritical = result.hasCritical || result.issues.some((i: any) => i.severity === 'CRITICAL');
+  
   console.group(
     `%c[PerfGuard] ${result.component}`,
-    "color: #ff4444; font-weight: bold; font-size: 12px;"
+    `color: ${hasCritical ? '#ff0000' : '#ff4444'}; font-weight: bold; font-size: 12px;`
   );
 
   console.info(
@@ -127,7 +15,15 @@ export function showWarning(result: any) {
   console.table(result.metrics);
 
   result.issues.forEach((issue: any) => {
-    const emoji = issue.severity === "HIGH" ? "🔴" : issue.severity === "MEDIUM" ? "🟡" : "🔵";
+    const emoji = issue.severity === "CRITICAL" 
+      ? '💥' 
+      : issue.severity === "HIGH" 
+      ? '🔴' 
+      : issue.severity === "MEDIUM" 
+      ? '🟡' 
+      : issue.severity === "LOW"
+      ? '🔵'
+      : 'ℹ️';
     
     console.group(`${emoji} ${issue.ruleId} (${issue.severity})`);
     console.info(`Confidence: ${(issue.confidence * 100).toFixed(0)}%`);
@@ -136,4 +32,68 @@ export function showWarning(result: any) {
   });
 
   console.groupEnd();
+}
+
+export function showCriticalAlert(result: any) {
+  console.group(
+    `%c💥 [CRITICAL] ${result.component}`,
+    "color: #fff; background: #dc2626; padding: 4px 8px; font-weight: bold; font-size: 14px;"
+  );
+
+  console.warn("⚠️ This component has CRITICAL performance issues!");
+  console.table(result.metrics);
+
+  result.issues
+    .filter((i: any) => i.severity === 'CRITICAL')
+    .forEach((issue: any) => {
+      console.group(`💥 ${issue.ruleId}`);
+      console.error(`Severity: ${issue.severity}`);
+      console.error(`Reason: ${issue.reason}`);
+      console.groupEnd();
+    });
+
+  console.groupEnd();
+
+  // Optional: Show visual alert in development
+  if (typeof document !== 'undefined') {
+    const alert = document.createElement('div');
+    alert.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #dc2626;
+      color: white;
+      padding: 16px 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10000;
+      font-family: monospace;
+      font-size: 14px;
+      max-width: 400px;
+      animation: slideIn 0.3s ease-out;
+    `;
+    
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    alert.innerHTML = `
+      <strong>💥 CRITICAL ISSUE</strong><br/>
+      Component: ${result.component}<br/>
+      ${result.issues.filter((i: any) => i.severity === 'CRITICAL').map((i: any) => `• ${i.ruleId}`).join('<br/>')}
+    `;
+    document.body.appendChild(alert);
+    setTimeout(() => alert.remove(), 10000);
+  }
 }

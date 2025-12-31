@@ -5,10 +5,9 @@
   "author": "Amiya Das",
   "license": "MIT",
   "private": true,
- "main": "./dist/index.cjs",
+  "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
-
   "exports": {
     ".": {
       "import": "./dist/index.mjs",
@@ -34,7 +33,13 @@
     "devtools"
   ],
   "devDependencies": {
+    "@babel/preset-env": "^7.28.5",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
     "@types/node": "^24.10.4",
+    "jest": "^30.2.0",
     "tsup": "^8.5.1",
     "typescript": "~5.9.3"
   },
