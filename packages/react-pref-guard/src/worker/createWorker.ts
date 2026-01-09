@@ -7,11 +7,23 @@ export function createAnalyzerWorker() {
 
     const history = new Map();
     const MAX_HISTORY = 10; // Increased for trend detection
+
+    const DOMINANT_RULES = new Set([
+    "BLOCKING_RENDER",
+    "SEVERE_PERF_REGRESSION",
+    "SUSPICIOUS_RENDER_LOOP",
+    "RENDER_TIME_CREEP",
+    ]);
+
     let RULES = [];
 
     /* -------------------------------
        Utilities
     -------------------------------- */
+
+    function hasDominantIssue(issues) {
+    return issues.some(issue => DOMINANT_RULES.has(issue.ruleId));
+    }
 
     function record(snapshot) {
       const list = history.get(snapshot.component) || [];
@@ -20,18 +32,32 @@ export function createAnalyzerWorker() {
       history.set(snapshot.component, list);
     }
 
-    function calculateConfidence(predicateFn, historyList) {
-      if (historyList.length === 0) return 0;
-      const matches = historyList.filter(predicateFn).length;
-      return matches / historyList.length;
-    }
+  function calculateConfidenceWithCurrent(predicateFn, historyList, snapshot) {
+   if (historyList.length === 0) return 1;
 
-    function downgradeSeverity(severity, confidence, boundaryType) {
-      if (boundaryType === "INLINE") return "INFO";
-      if (confidence < 0.7) return "LOW";
-      if (confidence < 0.85) return "MEDIUM";
-      return severity;
-    }
+    const matches = historyList.filter(predicateFn).length;
+    const currentMatch = predicateFn(snapshot) ? 1 : 0;
+
+   return (matches + currentMatch) / (historyList.length + 1);
+}
+
+  function downgradeSeverity(severity, confidence, boundaryType) {
+  //  CRITICAL is NEVER downgraded
+  if (severity === "CRITICAL") return "CRITICAL";
+
+  //  INLINE components downgrade by ONE level only
+  if (boundaryType === "INLINE") {
+    if (severity === "HIGH") return "MEDIUM";
+    if (severity === "MEDIUM") return "LOW";
+    return "INFO";
+  }
+
+  // 📉 Confidence-based softening
+  if (confidence < 0.7) return "LOW";
+  if (confidence < 0.85) return "MEDIUM";
+
+  return severity;
+}
 
     function buildPredicate({ field, operator, value }) {
       switch (operator) {
@@ -88,82 +114,211 @@ export function createAnalyzerWorker() {
        Rule Evaluation Engine
     -------------------------------- */
 
-    function evaluate(snapshot) {
-      const issues = [];
-      const historyList = history.get(snapshot.component) || [];
-      const previous = historyList[historyList.length - 1];
+function evaluate(snapshot) {
+  const issues = [];
+  const historyList = history.get(snapshot.component) || [];
+  const previous = historyList[historyList.length - 1];
 
-      for (const rule of RULES) {
+  /* ===============================
+     PASS 1: DOMINANT RULES ONLY
+     =============================== */
+  for (const rule of RULES) {
+    if (!DOMINANT_RULES.has(rule.id)) continue;
 
-        /* ----- Regression Rule ----- */
-        if (rule.regression && previous) {
-          const field = rule.regression.field;
-          const multiplier = rule.regression.multiplier;
+    /* ----- Regression Rule ----- */
+    if (rule.regression && previous) {
+      const field = rule.regression.field;
+      const multiplier = rule.regression.multiplier;
 
-          if (snapshot[field] > previous[field] * multiplier) {
-            const reason = interpolateMessage(rule.messageTemplate, {
-              prevValue: previous[field].toFixed(1),
-              currValue: snapshot[field].toFixed(1),
-            });
-
-            issues.push({
-              ruleId: rule.id,
-              confidence: 1,
-              severity: downgradeSeverity(rule.baseSeverity, 1, snapshot.boundaryType || "HOC"),
-              reason,
-            });
-          }
-          continue;
-        }
-
-        /* ----- Trend Detection Rule ----- */
-        if (rule.trend && historyList.length >= 5) {
-          const trend = detectTrend(historyList, rule.trend.field);
-          
-          if (
-            trend.direction === rule.trend.direction &&
-            trend.change >= rule.trend.threshold
-          ) {
-            const reason = interpolateMessage(rule.messageTemplate, {
-              change: trend.change.toFixed(1),
-            });
-
-            const confidence = Math.min(trend.change / 100, 1.0);
-
-            issues.push({
-              ruleId: rule.id,
-              confidence,
-              severity: downgradeSeverity(rule.baseSeverity, confidence, snapshot.boundaryType || "HOC"),
-              reason,
-            });
-          }
-          continue;
-        }
-
-        /* ----- Predicate Rule ----- */
-        if (rule.predicate) {
-          const predicateFn = buildPredicate(rule.predicate);
-          const confidence = calculateConfidence(predicateFn, historyList);
-          const threshold = rule.confidenceThreshold || 0.6;
-
-          if (predicateFn(snapshot) && confidence >= threshold) {
-            const reason = interpolateMessage(rule.messageTemplate, {
-              confidence: (confidence * 100).toFixed(0),
-            });
-
-            issues.push({
-              ruleId: rule.id,
-              confidence,
-              severity: downgradeSeverity(rule.baseSeverity, confidence, snapshot.boundaryType || "HOC"),
-              reason,
-            });
-          }
-        }
+      if (snapshot[field] > previous[field] * multiplier) {
+        issues.push({
+          ruleId: rule.id,
+          confidence: 1,
+          severity: downgradeSeverity(
+            rule.baseSeverity,
+            1,
+            snapshot.boundaryType || "HOC"
+          ),
+          reason: interpolateMessage(rule.messageTemplate, {
+            prevValue: previous[field].toFixed(1),
+            currValue: snapshot[field].toFixed(1),
+          }),
+        });
       }
-
-      record(snapshot);
-      return issues;
+      continue;
     }
+
+    /* ----- Trend Detection Rule ----- */
+    if (rule.trend && historyList.length >= 5) {
+      const trend = detectTrend(historyList, rule.trend.field);
+
+      if (
+        trend.direction === rule.trend.direction &&
+        trend.change >= rule.trend.threshold
+      ) {
+        const confidence = Math.min(trend.change / 100, 1.0);
+
+        issues.push({
+          ruleId: rule.id,
+          confidence,
+          severity: downgradeSeverity(
+            rule.baseSeverity,
+            confidence,
+            snapshot.boundaryType || "HOC"
+          ),
+          reason: interpolateMessage(rule.messageTemplate, {
+            change: trend.change.toFixed(1),
+          }),
+        });
+      }
+      continue;
+    }
+
+    /* ----- Predicate Rule ----- */
+    if (rule.predicate) {
+      const predicateFn = buildPredicate(rule.predicate);
+      const confidence = calculateConfidenceWithCurrent(
+  predicateFn,
+  historyList,
+  snapshot
+);
+      const threshold = rule.confidenceThreshold || 0.6;
+
+      if (predicateFn(snapshot) && confidence >= threshold) {
+        issues.push({
+          ruleId: rule.id,
+          confidence,
+          severity: downgradeSeverity(
+            rule.baseSeverity,
+            confidence,
+            snapshot.boundaryType || "HOC"
+          ),
+          reason: interpolateMessage(rule.messageTemplate, {
+            confidence: (confidence * 100).toFixed(0),
+          }),
+        });
+      }
+    }
+  }
+
+  /* ===============================
+     If dominant issue exists → stop
+     =============================== */
+  if (issues.length) {
+    // Allow DEV_HINT rules only
+    for (const rule of RULES) {
+      if (!rule.id.startsWith("DEV_HINT")) continue;
+      if (!rule.predicate) continue;
+
+      const predicateFn = buildPredicate(rule.predicate);
+      const confidence = calculateConfidenceWithCurrent(
+  predicateFn,
+  historyList,
+  snapshot
+);
+      const threshold = rule.confidenceThreshold || 0.6;
+
+      if (predicateFn(snapshot) && confidence >= threshold) {
+        issues.push({
+          ruleId: rule.id,
+          confidence,
+          severity: "INFO",
+          reason: interpolateMessage(rule.messageTemplate, {
+            confidence: (confidence * 100).toFixed(0),
+          }),
+        });
+      }
+    }
+
+    record(snapshot);
+    return issues;
+  }
+
+  /* ===============================
+     PASS 2: NORMAL RULES
+     =============================== */
+  for (const rule of RULES) {
+
+    /* ----- Regression Rule ----- */
+    if (rule.regression && previous) {
+      const field = rule.regression.field;
+      const multiplier = rule.regression.multiplier;
+
+      if (snapshot[field] > previous[field] * multiplier) {
+        issues.push({
+          ruleId: rule.id,
+          confidence: 1,
+          severity: downgradeSeverity(
+            rule.baseSeverity,
+            1,
+            snapshot.boundaryType || "HOC"
+          ),
+          reason: interpolateMessage(rule.messageTemplate, {
+            prevValue: previous[field].toFixed(1),
+            currValue: snapshot[field].toFixed(1),
+          }),
+        });
+      }
+      continue;
+    }
+
+    /* ----- Trend Detection Rule ----- */
+    if (rule.trend && historyList.length >= 5) {
+      const trend = detectTrend(historyList, rule.trend.field);
+
+      if (
+        trend.direction === rule.trend.direction &&
+        trend.change >= rule.trend.threshold
+      ) {
+        const confidence = Math.min(trend.change / 100, 1.0);
+
+        issues.push({
+          ruleId: rule.id,
+          confidence,
+          severity: downgradeSeverity(
+            rule.baseSeverity,
+            confidence,
+            snapshot.boundaryType || "HOC"
+          ),
+          reason: interpolateMessage(rule.messageTemplate, {
+            change: trend.change.toFixed(1),
+          }),
+        });
+      }
+      continue;
+    }
+
+    /* ----- Predicate Rule ----- */
+    if (rule.predicate) {
+      const predicateFn = buildPredicate(rule.predicate);
+      const confidence = calculateConfidenceWithCurrent(
+  predicateFn,
+  historyList,
+  snapshot
+);
+      const threshold = rule.confidenceThreshold || 0.6;
+
+      if (predicateFn(snapshot) && confidence >= threshold) {
+        issues.push({
+          ruleId: rule.id,
+          confidence,
+          severity: downgradeSeverity(
+            rule.baseSeverity,
+            confidence,
+            snapshot.boundaryType || "HOC"
+          ),
+          reason: interpolateMessage(rule.messageTemplate, {
+            confidence: (confidence * 100).toFixed(0),
+          }),
+        });
+      }
+    }
+  }
+
+  record(snapshot);
+  return issues;
+}
+
 
     /* -------------------------------
        Worker Message Handler
@@ -238,8 +393,6 @@ export function createAnalyzerWorker() {
   `;
 
   return new Worker(
-    URL.createObjectURL(
-      new Blob([code], { type: "application/javascript" })
-    )
+    URL.createObjectURL(new Blob([code], { type: "application/javascript" }))
   );
 }

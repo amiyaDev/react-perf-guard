@@ -1,6 +1,5 @@
 import { withPerfGuard } from "react-pref-guard";
 import { burnCPU } from "../Utils/prefUtils";
-import { TestWrapper } from "./TestWrapper";
 import { useEffect, useState } from "react";
 
 function VerySlowComp() {
@@ -18,7 +17,7 @@ function VerySlowComp() {
   return <div>VEry SLow compownwrt {tick}</div>;
 }
 
-function Test01Component() {
+function Test02Component() {
   return (
     // <TestWrapper id="test_02">
       <VerySlowComp />
@@ -26,4 +25,4 @@ function Test01Component() {
   );
 }
 
-export const Test02 = withPerfGuard(Test01Component);
+export const Test02 = withPerfGuard(Test02Component);

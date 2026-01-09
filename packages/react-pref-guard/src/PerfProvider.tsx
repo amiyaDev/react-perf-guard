@@ -1,10 +1,11 @@
-// PerfProvider.tsx 
-import React, { useEffect,  useState } from "react";
+// PerfProvider.tsx
+import React, { useEffect, useState } from "react";
 import { flushMetrics } from "./collector";
 import { showWarning, showCriticalAlert } from "./warnings";
 import { createAnalyzerWorker } from "./worker/createWorker";
 import { isDev } from "./env";
 import { getRulesConfig } from "./pref-engine/rules";
+import { PerfGuardPanel } from "./PrevGuardPanel";
 
 let worker: Worker | null = null;
 
@@ -21,7 +22,7 @@ export function PerfProvider({ children }: { children: React.ReactNode }) {
 
       // Initialize worker with rules
       const rules = getRulesConfig();
-      
+
       worker.postMessage({
         type: "INIT_RULES",
         payload: rules,
@@ -37,23 +38,18 @@ export function PerfProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (type === "RESULTS") {
-          console.log(`[PerfGuard] Analysis results: ${data.length} issue(s)`, {
-            hasCritical,
-            timestamp: new Date().toISOString()
-          });
-
-          // Update stats
-          setStats(prev => ({
+          setStats((prev) => ({
             issues: prev.issues + data.length,
-            critical: prev.critical + (hasCritical ? 1 : 0)
+            critical: prev.critical + (hasCritical ? 1 : 0),
           }));
 
-          // Show warnings
           data.forEach((result: any) => {
+            // 🔑 Always store
+            showWarning(result);
+
+            // 🔔 Extra attention for critical
             if (result.hasCritical) {
               showCriticalAlert(result);
-            } else {
-              showWarning(result);
             }
           });
         }
@@ -66,7 +62,6 @@ export function PerfProvider({ children }: { children: React.ReactNode }) {
       worker.onerror = (err) => {
         console.error("[PerfGuard] Worker error:", err);
       };
-
     } catch (err) {
       console.warn("[PerfGuard] Worker failed to start", err);
       return;
@@ -97,32 +92,10 @@ export function PerfProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Show stats overlay in dev mode
-  if (stats.critical > 0) {
-    return (
-      <>
-        {children}
-        <div 
-          style={{
-            position: 'fixed',
-            bottom: '16px',
-            right: '16px',
-            background: '#dc2626',
-            color: 'white',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-            zIndex: 10000,
-            fontFamily: 'monospace',
-            fontSize: '14px',
-            fontWeight: 'bold'
-          }}
-        >
-          🚨 {stats.critical} CRITICAL | {stats.issues} issues total
-        </div>
-      </>
-    );
-  }
-
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <PerfGuardPanel />
+    </>
+  );
 }

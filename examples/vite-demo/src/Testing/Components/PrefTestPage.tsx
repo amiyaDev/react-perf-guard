@@ -1,3 +1,4 @@
+import CriticalRegressionGuarded from "./CriticalIssueTest";
 import { Test01 } from "./Test_01";
 import { Test02 } from "./Test_02";
 import { Test03 } from "./Test_03";
@@ -14,8 +15,8 @@ import { Test12 } from "./Test_12";
 export default function PerfTestPage() {
   return (
     <>
-      {/* <Test01 /> */}
-      {/* <Test02 /> */}
+      <Test01 />
+      <Test02 />
       <Test03 />
       <Test04 />
       <Test05 />
@@ -26,6 +27,7 @@ export default function PerfTestPage() {
       <Test10 />
       <Test11 />
       <Test12 />
+      <CriticalRegressionGuarded />
     </>
   );
 }

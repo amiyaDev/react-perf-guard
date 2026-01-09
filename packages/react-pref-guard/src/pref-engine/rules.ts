@@ -295,19 +295,7 @@ export const PERF_RULES: PerfRule[] = [
     messageFields: ["confidence"],
   },
 
-  {
-    id: "PROD_READY_STABILITY",
-    category: "STABILITY",
-    baseSeverity: "INFO",
-    predicate: {
-      field: "renders",
-      operator: "<",
-      value: 10,
-    },
-    confidenceThreshold: 0.9,
-    messageTemplate: "✅ Component has stable render behavior (<10 renders)",
-    messageFields: ["confidence"],
-  },
+
 
   // ========================================
   // HELPFUL HINTS (DEVELOPMENT)
