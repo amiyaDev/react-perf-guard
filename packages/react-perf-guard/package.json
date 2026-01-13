@@ -1,6 +1,6 @@
 {
   "name": "react-perf-guard",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "Dev-only performance guardrail for React and Next.js using React Profiler",
   "author": "Amiya Das",
   "license": "MIT",

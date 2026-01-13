@@ -4,7 +4,7 @@ import { flushMetrics } from "./collector";
 import { showWarning, showCriticalAlert } from "./warnings";
 import { createAnalyzerWorker } from "./worker/createWorker";
 import { isDev } from "./env";
-import { getRulesConfig } from "./pref-engine/rules";
+import { getRulesConfig } from "./perf-engine/rules";
 import { PerfGuardPanel } from "./PrevGuardPanel";
 
 let worker: Worker | null = null;

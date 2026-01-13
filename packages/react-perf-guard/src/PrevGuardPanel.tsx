@@ -212,7 +212,6 @@ export function PerfGuardPanel() {
 
             <div style={footer}>
               <span style={footerText}>Last scan: just now</span>
-              <button style={scanButton}>Run Scan</button>
             </div>
           </div>
         )}

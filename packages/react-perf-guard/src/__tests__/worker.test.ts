@@ -3,7 +3,7 @@
 // 3. FIXED: worker.test.ts
 // ============================================
 import { createAnalyzerWorker } from '../worker/createWorker';
-import { PERF_RULES } from '../pref-engine/rules';
+import { PERF_RULES } from '../perf-engine/rules';
 
 beforeAll(() => {
   global.Worker = require('../../jest.worker.mock');

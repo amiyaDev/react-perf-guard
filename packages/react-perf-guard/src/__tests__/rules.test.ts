@@ -2,7 +2,7 @@
 // ============================================
 // 2. FIXED: rules.test.ts
 // ============================================
-import { PERF_RULES, getRulesConfig, RULE_GROUPS } from '../pref-engine/rules';
+import { PERF_RULES, getRulesConfig, RULE_GROUPS } from '../perf-engine/rules';
 
 describe('RULE_GROUPS', () => {
   it('all group rules must exist in PERF_RULES', () => {
