@@ -1,15 +1,24 @@
 // issueStore.ts – global dev-only issue store
 
+export type IssueMetrics = {
+  renders?: number;
+  avgTime?: number;
+  maxTime?: number;
+  phaseCounts?: { mount: number; update: number };
+};
+
 export type IssueRow = {
   id: string;
   component: string;
+  path?: string[];
   ruleId: string;
   severity: string;
   confidence: number;
   boundaryType: string;
   status: "NEW" | "ACTIVE" | "RESOLVED";
   lastSeen: number;
-  reason:string;
+  reason: string;
+  metrics?: IssueMetrics;
 };
 
 type Listener = (issues: IssueRow[]) => void;

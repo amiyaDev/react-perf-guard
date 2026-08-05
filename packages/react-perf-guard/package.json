@@ -1,6 +1,6 @@
 {
   "name": "react-perf-guard",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Dev-only performance guardrail for React and Next.js using React Profiler",
   "author": "Amiya Das",
   "repository": {
@@ -13,14 +13,14 @@
   },
   "license": "MIT",
   "private": false,
-  "main": "./dist/index.cjs",
+  "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "require": "./dist/index.js"
     }
   },
   "files": [
@@ -50,11 +50,16 @@
     "performance-monitoring"
   ],
   "devDependencies": {
+    "@babel/core": "^7.28.5",
+    "@babel/preset-env": "^7.28.5",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.10.4",
     "@types/react": "^19.2.7",
+    "babel-jest": "^30.2.0",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
     "rimraf": "^6.1.2",

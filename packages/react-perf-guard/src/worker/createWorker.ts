@@ -1,6 +1,9 @@
 // worker/createWorker.ts - Enhanced with trend detection
-export function createAnalyzerWorker() {
-  const code = `
+
+// Exported separately (not just inlined in createAnalyzerWorker) so tests can
+// execute this exact source instead of maintaining a second, hand-copied
+// reimplementation of the rule engine that can silently drift from it.
+export const WORKER_SOURCE = `
     /* ===============================
        PerfGuard – Enhanced Rule DSL Worker
        =============================== */
@@ -346,11 +349,13 @@ function evaluate(snapshot) {
           if (issues.length) {
             const componentResult = {
               component: snapshot.component,
+              path: snapshot.path,
               boundaryType: snapshot.boundaryType || "HOC",
               metrics: {
                 renders: snapshot.renders,
                 avgTime: snapshot.avgTime,
                 maxTime: snapshot.maxTime,
+                phaseCounts: snapshot.phaseCounts,
               },
               issues,
             };
@@ -392,7 +397,8 @@ function evaluate(snapshot) {
     };
   `;
 
+export function createAnalyzerWorker() {
   return new Worker(
-    URL.createObjectURL(new Blob([code], { type: "application/javascript" }))
+    URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "application/javascript" }))
   );
 }

@@ -16,6 +16,10 @@ export interface PerfGuardOptions {
 
 export interface ProfilerMetric {
   component: string;
+  // Full ancestor chain of nested PerfProfiler/withPerfGuard boundaries,
+  // e.g. ["App", "Dashboard", "UserTable"]. Falls back to [component] when
+  // this boundary has no PerfProfiler ancestor.
+  path?: string[];
   phase: RenderPhase;
   actualDuration: number;
   baseDuration: number;
@@ -26,6 +30,7 @@ export interface ProfilerMetric {
 
 export interface MetricSnapshot {
   component: string;
+  path?: string[];
   renders: number;
   avgTime: number;
   maxTime: number;

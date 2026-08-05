@@ -2,6 +2,7 @@
 
 import React, { Profiler } from "react";
 import { collectMetric } from "./collector";
+import { PerfPathContext, usePerfPath } from "./context/PerfPathContext";
 import type { PerfGuardOptions } from "./Typescript/prefTypes";
 
 const DEFAULT_OPTIONS: Required<PerfGuardOptions> = {
@@ -30,30 +31,35 @@ export function withPerfGuard<P extends object>(
   }
 
   const Guarded: React.FC<P> = (props) => {
+    const path = usePerfPath(name);
+
     return (
-      <Profiler
-        id={name}
-        onRender={(
-          id,
-          phase,
-          actualDuration,
-          baseDuration,
-          startTime,
-          commitTime
-        ) => {
-          collectMetric({
-            component: id,
+      <PerfPathContext.Provider value={path}>
+        <Profiler
+          id={name}
+          onRender={(
+            id,
             phase,
             actualDuration,
             baseDuration,
             startTime,
-            commitTime,
-            boundaryType,
-          });
-        }}
-      >
-        <Component {...props} />
-      </Profiler>
+            commitTime
+          ) => {
+            collectMetric({
+              component: id,
+              path,
+              phase,
+              actualDuration,
+              baseDuration,
+              startTime,
+              commitTime,
+              boundaryType,
+            });
+          }}
+        >
+          <Component {...props} />
+        </Profiler>
+      </PerfPathContext.Provider>
     );
   };
 

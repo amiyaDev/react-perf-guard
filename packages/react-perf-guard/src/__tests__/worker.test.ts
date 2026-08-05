@@ -86,11 +86,14 @@ describe('Worker - Rule Engine', () => {
           worker.postMessage({
             type: 'EVALUATE',
             payload: [
-              { component: 'SometimesSlow', avgTime: 20, maxTime: 30, renders: 5, boundaryType: 'HOC' },
-              { component: 'SometimesSlow', avgTime: 10, maxTime: 15, renders: 6, boundaryType: 'HOC' },
-              { component: 'SometimesSlow', avgTime: 12, maxTime: 18, renders: 5, boundaryType: 'HOC' },
-              { component: 'SometimesSlow', avgTime: 11, maxTime: 16, renders: 7, boundaryType: 'HOC' },
-              { component: 'SometimesSlow', avgTime: 18, maxTime: 25, renders: 8, boundaryType: 'HOC' },
+              // Alternating fast/slow: each slow sample lands with only ~50%
+              // corroborating history behind it, below SLOW_RENDER's 0.6
+              // confidence threshold, so it should never fire.
+              { component: 'SometimesSlow', avgTime: 10, maxTime: 15, renders: 5, boundaryType: 'HOC' },
+              { component: 'SometimesSlow', avgTime: 20, maxTime: 25, renders: 6, boundaryType: 'HOC' },
+              { component: 'SometimesSlow', avgTime: 10, maxTime: 15, renders: 5, boundaryType: 'HOC' },
+              { component: 'SometimesSlow', avgTime: 20, maxTime: 25, renders: 7, boundaryType: 'HOC' },
+              { component: 'SometimesSlow', avgTime: 10, maxTime: 15, renders: 8, boundaryType: 'HOC' },
             ]
           });
           jest.advanceTimersByTime(20);
@@ -139,7 +142,7 @@ describe('Worker - Rule Engine', () => {
   });
 
   describe('Severity Downgrade', () => {
-    it('should downgrade INLINE boundary to INFO', (done) => {
+    it('should downgrade INLINE boundary by one severity level', (done) => {
       worker.onmessage = (e) => {
         if (e.data.type === 'INIT_SUCCESS') {
           worker.postMessage({
@@ -153,8 +156,10 @@ describe('Worker - Rule Engine', () => {
           });
           jest.advanceTimersByTime(20);
         } else if (e.data.type === 'RESULTS') {
+          // SLOW_RENDER's base severity is HIGH. INLINE softens by exactly
+          // one level (HIGH -> MEDIUM), it does not jump all the way to INFO.
           const issue = e.data.data[0].issues[0];
-          expect(issue.severity).toBe('INFO');
+          expect(issue.severity).toBe('MEDIUM');
           done();
         }
       };
@@ -163,26 +168,29 @@ describe('Worker - Rule Engine', () => {
       jest.advanceTimersByTime(20);
     });
 
-    it('should downgrade based on confidence level', (done) => {
+    it('should downgrade to LOW when confidence is between 0.6 and 0.7', (done) => {
       worker.onmessage = (e) => {
         if (e.data.type === 'INIT_SUCCESS') {
           worker.postMessage({
             type: 'EVALUATE',
             payload: [
-              { component: 'MediumConfidence', avgTime: 20, maxTime: 30, renders: 5, boundaryType: 'HOC' },
-              { component: 'MediumConfidence', avgTime: 22, maxTime: 32, renders: 6, boundaryType: 'HOC' },
-              { component: 'MediumConfidence', avgTime: 12, maxTime: 18, renders: 5, boundaryType: 'HOC' },
-              { component: 'MediumConfidence', avgTime: 21, maxTime: 31, renders: 7, boundaryType: 'HOC' },
-              { component: 'MediumConfidence', avgTime: 23, maxTime: 33, renders: 8, boundaryType: 'HOC' },
+              // Snapshot 1 doesn't match the SLOW_RENDER predicate (16 is not
+              // > 16), and the 16 -> 20 jump stays under PERF_REGRESSION's
+              // 1.3x multiplier, so neither fires early. Snapshot 3 then
+              // fires SLOW_RENDER at confidence (1 match + 1 current) /
+              // (2 history + 1) = 0.667, landing in the <0.7 severity band.
+              { component: 'MediumConfidence', avgTime: 16, maxTime: 21, renders: 5, boundaryType: 'HOC' },
+              { component: 'MediumConfidence', avgTime: 20, maxTime: 25, renders: 5, boundaryType: 'HOC' },
+              { component: 'MediumConfidence', avgTime: 20, maxTime: 25, renders: 5, boundaryType: 'HOC' },
             ]
           });
           jest.advanceTimersByTime(20);
         } else if (e.data.type === 'RESULTS') {
-          if (e.data.data.length > 0) {
-            const issue = e.data.data[0].issues[0];
-            expect(['LOW', 'MEDIUM']).toContain(issue.severity);
-            done();
-          }
+          const issue = e.data.data[0]?.issues[0];
+          expect(issue.ruleId).toBe('SLOW_RENDER');
+          expect(issue.confidence).toBeCloseTo(0.667, 2);
+          expect(issue.severity).toBe('LOW');
+          done();
         }
       };
 
@@ -192,7 +200,13 @@ describe('Worker - Rule Engine', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle single snapshot (no history)', (done) => {
+    // A component with no prior history still gets evaluated immediately —
+    // the worker intentionally does not wait for corroborating history
+    // before reporting a slow first render, since that information is
+    // useful on its own (e.g. a genuinely slow first mount). Suppressing
+    // one-off spikes that never recur is handled one layer up, in
+    // warnings.ts's confirmation gate (see showWarning), not here.
+    it('evaluates a single snapshot with no prior history immediately', (done) => {
       worker.onmessage = (e) => {
         if (e.data.type === 'INIT_SUCCESS') {
           worker.postMessage({
@@ -203,7 +217,9 @@ describe('Worker - Rule Engine', () => {
           });
           jest.advanceTimersByTime(20);
         } else if (e.data.type === 'RESULTS') {
-          expect(e.data.data.length).toBe(0);
+          expect(e.data.data.length).toBeGreaterThan(0);
+          const issue = e.data.data[0].issues.find((i: any) => i.ruleId === 'SLOW_RENDER');
+          expect(issue?.confidence).toBe(1);
           done();
         }
       };
