@@ -3,20 +3,32 @@ import React, { useEffect, useState } from "react";
 import { flushMetrics } from "./collector";
 import { showWarning, showCriticalAlert } from "./warnings";
 import { createAnalyzerWorker } from "./worker/createWorker";
-import { isDev } from "./env";
+import { isPerfGuardActive, setForceEnabled } from "./env";
 import { getRulesConfig } from "./perf-engine/rules";
 import { PerfGuardPanel } from "./PrevGuardPanel";
 
 let worker: Worker | null = null;
 
-export function PerfProvider({ children }: { children: React.ReactNode }) {
+export function PerfProvider({
+  children,
+  forceEnable = false,
+}: {
+  children: React.ReactNode;
+  // Run PerfGuard even in a production build (NODE_ENV=production) — e.g.
+  // for a staging environment or a public demo deployment. Never enable
+  // this in a real production app: it defeats the zero-cost-in-prod guarantee.
+  forceEnable?: boolean;
+}) {
   const [stats, setStats] = useState({ issues: 0, critical: 0 });
 
-  if (!isDev) {
-    return <>{children}</>;
-  }
+  setForceEnabled(forceEnable);
+  const active = isPerfGuardActive();
 
+  // The effect is always called (Rules of Hooks) — it no-ops internally
+  // when inactive, rather than being skipped via an early return above.
   useEffect(() => {
+    if (!active) return;
+
     try {
       worker = createAnalyzerWorker();
 
@@ -90,7 +102,11 @@ export function PerfProvider({ children }: { children: React.ReactNode }) {
       worker?.terminate();
       worker = null;
     };
-  }, []);
+  }, [active]);
+
+  if (!active) {
+    return <>{children}</>;
+  }
 
   return (
     <>

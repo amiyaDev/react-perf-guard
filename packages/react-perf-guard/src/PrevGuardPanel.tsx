@@ -2,15 +2,91 @@
 
 import React, { useEffect, useState } from "react";
 import { subscribe, IssueRow } from "./issue-store/issueStore";
+import { getRuleInfo } from "./perf-engine/ruleDescriptions";
+
+function formatRelative(ts: number, now: number): string {
+  const diff = Math.max(0, now - ts);
+  if (diff < 2000) return "just now";
+  if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
+  return `${Math.round(diff / 3_600_000)}h ago`;
+}
+
+function formatPath(issue: IssueRow): string {
+  if (issue.path && issue.path.length > 1) return issue.path.join(" › ");
+  return issue.component;
+}
+
+function formatMetrics(metrics?: IssueRow["metrics"]): string | null {
+  if (!metrics) return null;
+  const parts: string[] = [];
+  if (typeof metrics.renders === "number") parts.push(`${metrics.renders} renders`);
+  if (typeof metrics.avgTime === "number") parts.push(`avg ${metrics.avgTime.toFixed(1)}ms`);
+  if (typeof metrics.maxTime === "number") parts.push(`max ${metrics.maxTime.toFixed(1)}ms`);
+  if (metrics.phaseCounts) {
+    parts.push(`${metrics.phaseCounts.mount} mount / ${metrics.phaseCounts.update} update`);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
+// Was this driven mostly by a one-time mount, or by repeated re-renders
+// after mount? These call for very different fixes (memoization only helps
+// with the second one), and telling them apart is what turns "is this
+// actually a problem?" into a concrete answer.
+type RenderNature = "mount" | "update" | "mixed" | null;
+
+function renderNature(metrics?: IssueRow["metrics"]): RenderNature {
+  const pc = metrics?.phaseCounts;
+  if (!pc) return null;
+  if (pc.mount > 0 && pc.update === 0) return "mount";
+  if (pc.update > 0 && pc.mount === 0) return "update";
+  if (pc.mount > 0 && pc.update > 0) return "mixed";
+  return null;
+}
+
+function natureInfo(nature: RenderNature): { label: string; hint: string } | null {
+  switch (nature) {
+    case "mount":
+      return {
+        label: "⏱ One-time load",
+        hint:
+          "Seen during initial mount, not repeated interaction. React.memo can't speed up a first mount — " +
+          "if this keeps happening on every load, consider virtualization (e.g. react-window) or paginating " +
+          "the data instead. If it only happens once and doesn't recur, it may not be worth fixing at all.",
+      };
+    case "update":
+      return {
+        label: "🔁 Recurring",
+        hint:
+          "Seen on repeated re-renders after mount, not just initial load — a strong sign of a missing " +
+          "React.memo, an unstable callback/prop, or an unnecessary state update. This is usually fixable.",
+      };
+    case "mixed":
+      return {
+        label: "⏱🔁 Mount + recurring",
+        hint: "Seen on both initial mount and later updates — worth checking both the first render and repeated re-renders.",
+      };
+    default:
+      return null;
+  }
+}
 
 export function PerfGuardPanel() {
   const [issues, setIssues] = useState<IssueRow[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     subscribe(setIssues);
   }, []);
+
+  // Keeps "Xs ago" labels fresh without waiting for the next issue update.
+  useEffect(() => {
+    if (!issues.length) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [issues.length]);
 
   if (!issues.length) {
   return (
@@ -105,8 +181,14 @@ export function PerfGuardPanel() {
 
         {open && (
           <div style={issuesContainer} className="issues-container">
+            <div style={legend}>
+              <strong>Severity</strong> = how badly this could affect real users ·{" "}
+              <strong>Confidence</strong> = how consistently PerfGuard has seen it, based on recent history
+            </div>
             <div style={issuesList}>
-              {sortedIssues.map((issue, idx) => (
+              {sortedIssues.map((issue, idx) => {
+                const nature = natureInfo(renderNature(issue.metrics));
+                return (
                 <div
                   key={issue.id}
                   onClick={() =>
@@ -126,7 +208,7 @@ export function PerfGuardPanel() {
                             issue.status === "ACTIVE" ? "status-dot-pulse" : ""
                           }
                         ></span>
-                        <span style={componentName}>{issue.component}</span>
+                        <span style={componentName}>{formatPath(issue)}</span>
                         {issue.status === "RESOLVED" ? (
                           <span style={statusBadgeResolved}>✓ Resolved</span>
                         ) : (
@@ -137,13 +219,12 @@ export function PerfGuardPanel() {
                             ● Open
                           </span>
                         )}
+                        <span style={lastSeenLabel}>{formatRelative(issue.lastSeen, now)}</span>
                       </div>
 
                       <div style={ruleId}>
-                        {issue.ruleId
-                          .split("-")
-                          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-                          .join(" ")}
+                        {getRuleInfo(issue.ruleId).label}
+                        {nature && <span style={natureBadge}>{nature.label}</span>}
                       </div>
 
                       <div style={issueMetrics}>
@@ -175,12 +256,21 @@ export function PerfGuardPanel() {
                       {selectedIssue === issue.id && (
                         <div style={issueDetails} className="issue-details">
                           <div style={detailsContent}>
-                            <span style={detailsText}>
-                              Rule ID: {issue.ruleId}
-                            </span>
                             <span style={detailsDescription}>
-                              {issue.reason}
+                              {getRuleInfo(issue.ruleId).explain}
                             </span>
+                            <span style={detailsFix}>
+                              💡 {getRuleInfo(issue.ruleId).fix}
+                            </span>
+                            {nature && <span style={detailsFix}>{nature.label}: {nature.hint}</span>}
+                            {formatMetrics(issue.metrics) && (
+                              <span style={detailsText}>{formatMetrics(issue.metrics)}</span>
+                            )}
+                            <span style={detailsText}>
+                              Rule ID: {issue.ruleId} · Boundary: {issue.boundaryType} · Last seen:{" "}
+                              {formatRelative(issue.lastSeen, now)}
+                            </span>
+                            <span style={detailsText}>Raw reason: {issue.reason}</span>
                           </div>
                         </div>
                       )}
@@ -207,11 +297,16 @@ export function PerfGuardPanel() {
                     </svg>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             <div style={footer}>
-              <span style={footerText}>Last scan: just now</span>
+              <span style={footerText}>
+                Last update:{" "}
+                {formatRelative(Math.max(...issues.map((i) => i.lastSeen)), now)} · Issues clear on their
+                own ~12s after they stop recurring
+              </span>
             </div>
           </div>
         )}
@@ -438,6 +533,15 @@ const issuesList: React.CSSProperties = {
   borderTop: "1px solid #1e293b",
 };
 
+const legend: React.CSSProperties = {
+  padding: "8px 16px",
+  fontSize: 11,
+  color: "#94a3b8",
+  background: "rgba(255, 255, 255, 0.02)",
+  borderBottom: "1px solid #1e293b",
+  lineHeight: 1.5,
+};
+
 const issueCard = (idx: number): React.CSSProperties => ({
   padding: 16,
   cursor: "pointer",
@@ -500,6 +604,21 @@ const ruleId: React.CSSProperties = {
   fontWeight: 500,
 };
 
+const lastSeenLabel: React.CSSProperties = {
+  marginLeft: "auto",
+  fontSize: 11,
+  color: "#64748b",
+};
+
+const natureBadge: React.CSSProperties = {
+  marginLeft: 8,
+  padding: "1px 6px",
+  fontSize: 10,
+  borderRadius: 4,
+  background: "rgba(148, 163, 184, 0.15)",
+  color: "#cbd5e1",
+};
+
 const issueMetrics: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -554,19 +673,25 @@ const issueDetails: React.CSSProperties = {
 const detailsContent: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  //   justifyContent: "space-between",
   alignItems: "flex-start",
-  gap: 2,
+  gap: 6,
   fontSize: 12,
   color: "#94a3b8",
 };
 
 const detailsDescription: React.CSSProperties = {
-  color: "#b8b594ff",
+  color: "#e2e8f0",
+  lineHeight: 1.5,
+};
+
+const detailsFix: React.CSSProperties = {
+  color: "#93c5fd",
+  lineHeight: 1.5,
 };
 
 const detailsText: React.CSSProperties = {
-  color: "#94a3b8",
+  color: "#64748b",
+  fontSize: 11,
 };
 
 const detailsButton: React.CSSProperties = {
