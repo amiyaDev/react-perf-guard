@@ -49,6 +49,8 @@ jest.mock('../warnings', () => ({
 // Mock isDev
 jest.mock('../env', () => ({
   isDev: true,
+  isPerfGuardActive: jest.fn(() => true),
+  setForceEnabled: jest.fn(),
 }));
 
 describe('PerfGuard - End-to-End Integration', () => {
@@ -66,6 +68,9 @@ describe('PerfGuard - End-to-End Integration', () => {
 
   describe('PerfProvider Integration', () => {
     it('should render children without PerfGuard in production', () => {
+      const { isPerfGuardActive } = require('../env');
+      (isPerfGuardActive as jest.Mock).mockReturnValueOnce(false);
+
       const { container } = render(
         <PerfProvider>
           <div>Test Content</div>
@@ -89,7 +94,7 @@ describe('PerfGuard - End-to-End Integration', () => {
 
       await waitFor(() => {
         expect(global.console.log).toHaveBeenCalledWith(
-          expect.stringContaining('[PerfGuard] Initialized with')
+          expect.stringContaining('[PerfGuard] Worker ready with')
         );
       }, { timeout: 1000 });
     });
@@ -370,9 +375,13 @@ describe('PerfGuard - End-to-End Integration', () => {
         // Should detect issues in Sidebar (slow + excessive renders)
         const sidebarWarning = mockWarnings.find(w => w.component === 'Sidebar');
         expect(sidebarWarning).toBeDefined();
-        
-        // Should not detect issues in Header (too fast)
-        const headerWarning = mockWarnings.find(w => w.component === 'Header');
+
+        // Header is fast enough to earn PROD_READY_PERF (an INFO-level
+        // confirmation, not a problem) — it should not have anything more
+        // severe than that.
+        const headerWarning = mockWarnings.find(
+          (w) => w.component === 'Header' && w.issues?.some((i: any) => i.severity !== 'INFO')
+        );
         expect(headerWarning).toBeUndefined();
       }, { timeout: 2000 });
     });
@@ -412,8 +421,12 @@ describe('PerfGuard - End-to-End Integration', () => {
       });
 
       await waitFor(() => {
+        // PerfProvider logs this as two args: console.error("[PerfGuard]
+        // Worker error:", err) — match both rather than the whole call as
+        // a single string.
         expect(global.console.error).toHaveBeenCalledWith(
-          expect.stringContaining('[PerfGuard] Worker error')
+          expect.stringContaining('[PerfGuard] Worker error'),
+          expect.anything()
         );
       }, { timeout: 1000 });
 

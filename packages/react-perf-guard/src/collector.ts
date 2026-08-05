@@ -7,6 +7,7 @@ type InternalMetric = {
   totalTime: number;
   maxTime: number;
   boundaryType: ProfilerMetric["boundaryType"];
+  path?: string[];
   phaseCounts: {
     mount: number;
     update: number;
@@ -18,6 +19,7 @@ const buffer = new Map<string, InternalMetric>();
 export function collectMetric(metric: ProfilerMetric) {
   const {
     component,
+    path,
     phase,
     actualDuration,
     boundaryType,
@@ -31,6 +33,7 @@ export function collectMetric(metric: ProfilerMetric) {
       totalTime: 0,
       maxTime: 0,
       boundaryType,
+      path,
       phaseCounts: { mount: 0, update: 0 },
     };
     buffer.set(component, entry);
@@ -52,6 +55,7 @@ export function flushMetrics(): MetricSnapshot[] {
   for (const [component, metric] of buffer.entries()) {
     snapshot.push({
       component,
+      path: metric.path,
       renders: metric.renders,
       avgTime:
         metric.renders > 0

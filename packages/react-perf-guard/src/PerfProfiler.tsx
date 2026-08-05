@@ -1,9 +1,10 @@
 // PerfProfiler.tsx
 
 import { Profiler } from "react";
-import { isDev } from "./env";
+import { isPerfGuardActive } from "./env";
 import { ProfilerMetric } from "./Typescript/prefTypes";
 import { collectMetric } from "./collector";
+import { PerfPathContext, usePerfPath } from "./context/PerfPathContext";
 
 export function PerfProfiler({
   id,
@@ -14,33 +15,38 @@ export function PerfProfiler({
   boundaryType?: ProfilerMetric["boundaryType"];
   children: React.ReactNode;
 }) {
-  if (!isDev) {
+  const path = usePerfPath(id);
+
+  if (!isPerfGuardActive()) {
     return <>{children}</>;
   }
 
   return (
-    <Profiler
-      id={id}
-      onRender={(
-        component,
-        phase,
-        actualDuration,
-        baseDuration,
-        startTime,
-        commitTime
-      ) => {
-        collectMetric({
+    <PerfPathContext.Provider value={path}>
+      <Profiler
+        id={id}
+        onRender={(
           component,
           phase,
           actualDuration,
           baseDuration,
           startTime,
-          commitTime,
-          boundaryType,
-        });
-      }}
-    >
-      {children}
-    </Profiler>
+          commitTime
+        ) => {
+          collectMetric({
+            component,
+            path,
+            phase,
+            actualDuration,
+            baseDuration,
+            startTime,
+            commitTime,
+            boundaryType,
+          });
+        }}
+      >
+        {children}
+      </Profiler>
+    </PerfPathContext.Provider>
   );
 }

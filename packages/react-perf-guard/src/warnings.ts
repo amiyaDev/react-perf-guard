@@ -10,6 +10,7 @@ type Issue = {
 
 type Result = {
   component: string;
+  path?: string[];
   boundaryType: string;
   metrics: any;
   issues: Issue[];
@@ -20,22 +21,76 @@ type Result = {
 --------------------------------------------- */
 
 type IssueState = {
+  component: string;
   issue: Issue;
-  missingCount: number;
+  lastSeen: number;
+  // How many *separate* evaluation cycles (5s apart, per PerfProvider's
+  // flush interval) this fingerprint has appeared in.
+  sightings: number;
+  // Whether it has recurred enough to be shown as a genuine issue, as
+  // opposed to a one-off spike (a single big mount, one debounced render).
+  confirmed: boolean;
 };
 
 const activeIssues = new Map<string, IssueState>();
 const lastLogTime = new Map<string, number>();
 
-const LOG_COOLDOWN = 30_000;          // log once per 30s
-const RESOLVE_AFTER_MISSES = 3;       // batches before resolving
+const LOG_COOLDOWN = 30_000; // log once per 30s
+
+// An issue auto-resolves once it hasn't been re-confirmed by a fresh
+// evaluation for this long. This is wall-clock based on purpose: resolution
+// used to depend on the *same* component showing up "clean" in a future
+// EVALUATE batch, which only happens if it keeps rendering. A component
+// that simply stops re-rendering (e.g. the user stops interacting with it)
+// would then never get re-evaluated, so its issues stayed "ACTIVE" forever.
+const STALE_AFTER_MS = 12_000;
+const SWEEP_INTERVAL_MS = 4_000;
+
+// An issue must recur in at least this many separate evaluation cycles
+// before it's ever shown. Without this, a single legitimately-expensive
+// render — mounting a large dataset for the first time, one debounced
+// search re-render — gets reported with 100% confidence on first sight,
+// indistinguishable from an actual recurring bug. Requiring recurrence is
+// what makes "ignores one-off spikes" (see README) actually true.
+const CONFIRM_AFTER_SIGHTINGS = 2;
+
+// Exempt from gating: an unambiguous runaway loop is worth knowing about
+// immediately, even if it never happens again.
+const IMMEDIATE_RULES = new Set(["SUSPICIOUS_RENDER_LOOP"]);
+
+let sweepStarted = false;
 
 /* --------------------------------------------
    Utilities
 --------------------------------------------- */
 
-function fingerprint(component: string, issue: Issue) {
-  return `${component}:${issue.ruleId}:${issue.severity}`;
+// Identity deliberately excludes severity/confidence: those can shift batch
+// to batch for what is really the *same* underlying issue (e.g. confidence
+// crossing a downgrade threshold). Keying the fingerprint on them used to
+// spawn a brand-new, orphaned panel row every time that happened, instead
+// of updating the existing one in place.
+function fingerprint(component: string, ruleId: string) {
+  return `${component}:${ruleId}`;
+}
+
+function ensureSweepStarted() {
+  if (sweepStarted) return;
+  sweepStarted = true;
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const [fp, state] of activeIssues.entries()) {
+      if (now - state.lastSeen >= STALE_AFTER_MS) {
+        activeIssues.delete(fp);
+        // Only tell the store to resolve something it was actually told
+        // about — unconfirmed sightings never got upserted in the first place.
+        if (state.confirmed) {
+          resolveIssue(fp);
+          logResolvedIssue(state.component, state.issue);
+        }
+      }
+    }
+  }, SWEEP_INTERVAL_MS);
 }
 
 function shouldLog(fp: string) {
@@ -69,61 +124,52 @@ function severityColor(sev: Issue["severity"]) {
    Public API
 --------------------------------------------- */
 
+function publish(fp: string, result: Result, issue: Issue, status: "NEW" | "ACTIVE", now: number) {
+  upsertIssue({
+    id: fp,
+    component: result.component,
+    path: result.path,
+    ruleId: issue.ruleId,
+    severity: issue.severity,
+    confidence: issue.confidence,
+    boundaryType: result.boundaryType,
+    status,
+    reason: issue.reason,
+    lastSeen: now,
+    metrics: result.metrics,
+  });
+}
+
 export function showWarning(result: Result) {
-  // console.log("[PerfGuard] Processing result for", result);
-  const seenThisBatch = new Set<string>();
+  ensureSweepStarted();
 
-  // 1️⃣ Process current issues
   for (const issue of result.issues) {
-    const fp = fingerprint(result.component, issue);
-    seenThisBatch.add(fp);
-
+    const fp = fingerprint(result.component, issue.ruleId);
+    const now = Date.now();
     const state = activeIssues.get(fp);
 
     if (!state) {
-      activeIssues.set(fp, { issue, missingCount: 0 });
+      const confirmed = IMMEDIATE_RULES.has(issue.ruleId);
+      activeIssues.set(fp, { component: result.component, issue, lastSeen: now, sightings: 1, confirmed });
 
-      upsertIssue({
-        id: fp,
-        component: result.component,
-        ruleId: issue.ruleId,
-        severity: issue.severity,
-        confidence: issue.confidence,
-        boundaryType: result.boundaryType,
-        status: "NEW",
-        reason: issue.reason,
-        lastSeen: Date.now(),
-      });
-
-      if (shouldLog(fp)) {
-        logNewIssue(result, issue);
+      if (confirmed) {
+        publish(fp, result, issue, "NEW", now);
+        if (shouldLog(fp)) logNewIssue(result, issue);
       }
+      // else: first sighting of a gated rule — wait to see if it recurs
+      // before treating it as a genuine issue rather than a one-off spike.
     } else {
-      // Still active → reset miss counter
-      state.missingCount = 0;
-      upsertIssue({
-        id: fp,
-        component: result.component,
-        ruleId: issue.ruleId,
-        severity: issue.severity, // CRITICAL preserved
-        confidence: issue.confidence,
-        boundaryType: result.boundaryType,
-        status: "ACTIVE",
-        reason: issue.reason,
-        lastSeen: Date.now(),
-      });
-    }
-  }
+      state.issue = issue;
+      state.lastSeen = now;
 
-  // 2️⃣ Handle missing issues (gracefully)
-  for (const [fp, state] of activeIssues.entries()) {
-    if (!seenThisBatch.has(fp)) {
-      state.missingCount++;
-
-      if (state.missingCount >= RESOLVE_AFTER_MISSES) {
-        activeIssues.delete(fp);
-        resolveIssue(fp);
-        logResolvedIssue(result.component, state.issue);
+      if (!state.confirmed) {
+        state.sightings += 1;
+        if (state.sightings < CONFIRM_AFTER_SIGHTINGS) continue;
+        state.confirmed = true;
+        publish(fp, result, issue, "NEW", now);
+        if (shouldLog(fp)) logNewIssue(result, issue);
+      } else {
+        publish(fp, result, issue, "ACTIVE", now);
       }
     }
   }
@@ -133,7 +179,12 @@ export function showCriticalAlert(result: Result) {
   for (const issue of result.issues) {
     if (issue.severity !== "CRITICAL") continue;
 
-    const fp = fingerprint(result.component, issue);
+    const fp = fingerprint(result.component, issue.ruleId);
+
+    // Only pop the overlay for issues that have actually been confirmed —
+    // showWarning() runs first each cycle, so this reflects the up-to-date
+    // confirmation state for the same result.
+    if (!activeIssues.get(fp)?.confirmed) continue;
 
     // once per lifecycle
     if (!shouldLog(fp)) continue;

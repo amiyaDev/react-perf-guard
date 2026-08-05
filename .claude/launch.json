@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "perf-guard-demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "perf-guard-demo", "dev"],
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "perf-guard-demo-prod",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "perf-guard-demo", "preview"],
+      "port": 4173,
+      "autoPort": true
+    }
+  ]
+}
